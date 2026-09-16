@@ -581,7 +581,11 @@ def runClient(
                 coin_opts = copy.deepcopy(base_coin_opts) + getCoreBinArgs(
                     coin_id, v, use_tor_proxy=swap_client.use_tor_proxy
                 )
-                extra_config = {"coin_name": c}
+                extra_config = {
+                    "coin_name": c,
+                    "stdout_to_file": True,
+                    "stdout_filename": c + "d_stdout.log",
+                }
                 daemons.append(
                     startDaemon(
                         v["datadir"],
