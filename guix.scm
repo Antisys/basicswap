@@ -3,11 +3,8 @@
 #:use-module ((guix licenses) #:prefix license:)
 #:use-module (guix build-system gnu)
 #:use-module (guix build-system pyproject)
-#:use-module (guix build-system python)
-#:use-module (guix download)
 #:use-module (guix git-download)
 #:use-module (guix search-paths)
-#:use-module (guix utils)
 #:use-module (gnu packages)
 #:use-module (gnu packages autotools)
 #:use-module (gnu packages certs)
@@ -69,24 +66,6 @@
     (license license:unlicense)))
 
 
-(define-public cmake-3.31
-  (package
-    (inherit cmake)
-    (version "3.31.8")
-    (source (origin
-              (method url-fetch)
-              (uri (string-append "https://cmake.org/files/v";
-                                  (version-major+minor version)
-                                  "/cmake-" version ".tar.gz"))
-              (sha256
-               (base32
-                "1akcmx9w5wbygq088hrr13l6n4b5npqvh9jk20934bfwhg5f7kg3"))))
-    (native-inputs
-     (modify-inputs (package-native-inputs cmake)
-       ;; Avoid circular dependency with (gnu packages debug).
-       (prepend (module-ref (resolve-interface '(gnu packages debug))
-                            'cppdap))))))
-
 (define python-coincurve-basicswap
   (package
     (name "python-coincurve-basicswap")
@@ -115,17 +94,14 @@
     (propagated-inputs
      (list
       libsecp256k1-basicswap
-      python-asn1crypto
       python-cffi))
     (native-inputs
      (list
-      cmake-3.31
+      cmake
       python-hatchling
-      python-scikit-build
       python-scikit-build-core
       pkg-config
       python-pytest
-      python-pytest-benchmark
       ))
     (synopsis "Python libsecp256k1 wrapper")
     (description "Python libsecp256k1 wrapper.")
@@ -135,15 +111,15 @@
 (define-public basicswap
 (package
   (name "basicswap")
-  (version "0.18.5")
+  (version "0.18.9")
   (source (origin
     (method git-fetch)
     (uri (git-reference
       (url "https://github.com/basicswap/basicswap")
-      (commit "3accf32bef8f64db4233e577fb85bb405baab28b")))
+      (commit "e98c0194ac44298ecfdbea63eed08a27edaea01a")))
     (sha256
       (base32
-        "0459ar1n5nzlp830fn1lp5km4km61z6625w88m5rsxqhcvhxpi35"))
+        "1viafcrnssh0r4qzaqlczbbcpi0bclk7fxs6f4dqfjv57iy1x4v9"))
     (file-name (git-file-name name version))))
   (build-system pyproject-build-system)
 
@@ -162,7 +138,6 @@
     nss-certs
     python-coincurve-basicswap
     python-pycryptodome
-    python-pytest
     python-pyzmq
     python-gnupg
     python-jinja2
@@ -171,9 +146,7 @@
   (native-inputs
    (list
     python-hatchling
-    python-wheel
-    python-pylint
-    python-pyflakes))
+    python-pytest))
   (synopsis "Simple Atomic Swap Network - Proof of Concept")
   (description "Facilitates cross-chain atomic swaps")
   (home-page "https://github.com/basicswap/basicswap")

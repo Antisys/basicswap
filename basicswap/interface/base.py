@@ -9,7 +9,6 @@ import socks
 import threading
 
 from enum import IntEnum
-from typing import List, Optional
 
 from basicswap.basicswap_util import (
     TxLockTypes,
@@ -225,7 +224,27 @@ class CoinInterface:
         # swipe, that publishes it while the swipe can still be replaced.
         return False
 
-    def getMercyWatchVouts(self, swipe_txid_hex: str, swipe_tx=None) -> List[int]:
+    def swipePaysKey(
+        self, swipe_tx_bytes: bytes, swipe_txid_hex: str, key: bytes
+    ) -> bool:
+        # TODO: Remove.  Bids whose swipe was built before the payout moved to a
+        # swap derived key pay a pooled address, and their mercy tx has to be
+        # signed by the wallet as it was then.
+        return True
+
+    def mercySpendImportsKey(self) -> bool:
+        # Whether prepareMercySpend leaves the wallet able to spend the swipe
+        # payout on its own.  Where it does not, the payout is only recoverable
+        # by a tx signed with the key here.
+        return False
+
+    def prepareMercySpend(self, key: bytes, rescan_from: int) -> None:
+        # Called before building the mercy tx, for coins that can only spend the
+        # swipe payout through the wallet.  Nothing to do where the mercy tx is
+        # signed with the key directly.
+        pass
+
+    def getMercyWatchVouts(self, swipe_txid_hex: str, swipe_tx=None) -> list[int]:
         # Which outputs of the swipe a mercy tx could spend.  The leader has to
         # watch each one, it can't tell which the swiper will use.
         return [0]
@@ -245,17 +264,17 @@ class CoinInterface:
 
 
 class AdaptorSigInterface:
-    def getP2WPKHDummyWitness(self, verifying: bool = True) -> List[bytes]:
+    def getP2WPKHDummyWitness(self, verifying: bool = True) -> list[bytes]:
         # 72 bytes overestimates by 1. Core uses 71-byte low-R signatures
         return [bytes(71 if verifying else 72), bytes(33)]
 
-    def getScriptLockTxDummyWitness(self, script: bytes) -> List[bytes]:
+    def getScriptLockTxDummyWitness(self, script: bytes) -> list[bytes]:
         return [b"", bytes(72), bytes(72), bytes(len(script))]
 
-    def getScriptLockRefundSpendTxDummyWitness(self, script: bytes) -> List[bytes]:
+    def getScriptLockRefundSpendTxDummyWitness(self, script: bytes) -> list[bytes]:
         return [b"", bytes(72), bytes(72), bytes((1,)), bytes(len(script))]
 
-    def getScriptLockRefundSwipeTxDummyWitness(self, script: bytes) -> List[bytes]:
+    def getScriptLockRefundSwipeTxDummyWitness(self, script: bytes) -> list[bytes]:
         return [bytes(72), b"", bytes(len(script))]
 
     def getLockRefundTxFee(self, locked_coin: int, tx_lock_refund_bytes: bytes) -> int:
@@ -312,7 +331,7 @@ class Secp256k1Interface(CoinInterface, AdaptorSigInterface):
         if len(address_hash) == 20:
             return True
 
-    def getMedianTimePastAtHeight(self, height: int) -> Optional[int]:
+    def getMedianTimePastAtHeight(self, height: int) -> int | None:
         # BIP68 measures time based relative locks from the median time past of the
         # block before the one containing the output being spent, not its header time
         if height < 0:
@@ -327,7 +346,7 @@ class Secp256k1Interface(CoinInterface, AdaptorSigInterface):
             self._mtp_at_height_cache[height] = mtp
         return mtp
 
-    def _getMedianTimePastAtHeight(self, height: int) -> Optional[int]:
+    def _getMedianTimePastAtHeight(self, height: int) -> int | None:
         try:
             return self.getBlockHeaderFromHeight(height)["mediantime"]
         except Exception as e:
@@ -338,12 +357,12 @@ class Secp256k1Interface(CoinInterface, AdaptorSigInterface):
         self,
         lock_type: int,
         encoded_sequence: int,
-        parent_block_height: Optional[int],
-        parent_block_time: Optional[int],
-        chain_height: Optional[int] = None,
-        chain_mtp: Optional[int] = None,
-        coin_mtp: Optional[int] = None,
-    ) -> Optional[int]:
+        parent_block_height: int | None,
+        parent_block_time: int | None,
+        chain_height: int | None = None,
+        chain_mtp: int | None = None,
+        coin_mtp: int | None = None,
+    ) -> int | None:
         # Blocks or seconds until the lock matures, None if it can't be determined
         if parent_block_height is None or parent_block_height < 1:
             return None

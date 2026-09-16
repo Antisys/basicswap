@@ -1,3 +1,105 @@
+0.18.9
+==============
+
+**Fixes**
+- The websocket server no longer logs an "SSL failed" warning about the key and cert
+  paths, or a traceback, when a client fails the TLS handshake.
+
+**Daemon updates**
+- Particl Core  v27.2.4 -> v27.2.5
+
+
+0.18.8
+==============
+
+**Fixes**
+- When a swap fails and the follower swipes the chain A lock refund output, the follower's
+  coin is no longer left on the swap key if no mercy tx is sent.  When the
+  node gives up on the mercy tx, or altruistic is turned off, the payout is now swept to
+  the wallet in a tx that carries no keyshare.  Particl blind imports the key into the
+  wallet instead.  BCH, and swipes built before 0.18.7, were never affected.
+- If that sweep fails, or the swipe tx hasn't confirmed yet, the bid logs a warning that
+  points to the debug page.
+
+**Security / hardening**
+- The websocket server rejects frames larger than 4 MiB, limits the length of handshake
+  lines and the number of headers, and drops a client that disconnects without a close
+  frame.
+- A wallet seed that would give an invalid BIP32 master key is rejected instead of used.
+
+**UI**
+- The debug page can sweep a bid's swipe payout by bid ID.  It recovers payouts the
+  automatic sweep misses.  It refuses while a mercy tx is still to be sent.
+
+**Upgrade note**
+- 0.18.7 was tagged without its version bump.
+
+
+0.18.7
+==============
+
+**Security / hardening**
+- The swipe tx pays a key derived for the swap instead of an address from the wallet's
+  pool, on coins that send a mercy tx.  The wallet can no longer select the swipe payout
+  for another tx before the mercy tx has spent it, and the mercy tx now also moves the coin
+  into the wallet.  BCH is unchanged: its covenant pays the swipe to a wallet address, which
+  stays locked until the mercy tx spends it.
+
+**Fixes**
+- Electrum-backed wallets can spend their own unconfirmed change, as a full node wallet
+  does.  Funding a tx soon after another one no longer fails for lack of confirmed UTXOs.
+- The inputs of a prefunded bid are unlocked when the bid expires.
+- When accepting an adaptor-sig bid fails after the lock tx has been funded, its inputs
+  are unlocked.  The accepted state and its message links are saved together, so a
+  failure leaves no partly accepted bid behind.
+- A failed `smsgsend` with no response logs the real error.  In debug mode it raised an
+  unrelated error that hid the cause.
+
+**UI**
+- A Monero or Wownero wallet that can't be reached no longer shows a balance of 0 on the
+  wallet page.  The last known balance stays until the wallet responds.
+- Pending balances no longer flicker, and each badge only updates for its own coin.
+
+**Daemon updates**
+- Litecoin 0.21.5.7 -> 0.21.5.8
+
+
+0.18.6
+==============
+
+**Fixes**
+- Monero RPC through Tor: every call opens its own SOCKS connection.  Threads were sharing
+  one cached connection, which produced "Request-sent", "Idle" and broken socket errors.
+- `allowed_hosts` entries in host:port form, e.g. `my.onion:12700`, are accepted by the
+  Origin check.  Only bare hosts and full origins matched before, so a POST from such a
+  host was rejected as cross-origin.
+- The login and unlock pages show the server's actual rejection reason.  A Host or Origin
+  rejection was reported as "Invalid password".
+- The `electrum_poll_interval` chain client setting is applied.  It was never copied from
+  the config, so the default was always used.
+- Block target times corrected for BCH, Firo and Litecoin, and added for Monero and
+  Wownero.
+- The compatibility path that searched the swipe tx for a mercy output is removed.  0.18.5
+  already refuses adaptor-sig swaps with peers below protocol version 6, so an old-style
+  mercy output can no longer arrive.
+- Connections to the websocket port that are not a websocket handshake (port scans, TLS
+  hellos, plain HTTP) are closed instead of raising a traceback in the handler thread.
+
+**Settings**
+- New setting `check_electrum_legacy_funds`, off by default.  When on, electrum-backed BTC
+  and LTC wallets query the balance of legacy addresses left from a full node wallet
+  migration and show a banner if any hold funds.  The check runs with the full scans only.
+- `check_updates_seconds` defaults to 4 hours, down from 1 day, and can be set from the
+  settings page.
+  - `check_updates_seconds` sets how often BasicSwap checks for a newer release on GitHub.
+
+**UI**
+- Mobile menu items are aligned.
+
+**Daemon updates**
+- Litecoin 0.21.5.6 -> 0.21.5.7
+
+
 0.18.5
 ==============
 
@@ -27,7 +129,7 @@
 **UI**
 - The bid debug header is only shown in debug UI mode.
 
-**Dependencies**
+**Daemon updates**
 - Firo 0.14.17.2 -> 0.14.18.0
 
 **Upgrade note**

@@ -39,6 +39,7 @@ class KeyTypes(IntEnum):
     KBVF = 4
     KBSF = 5
     KAF = 6
+    KA_SWIPE = 7
 
 
 class MessageNetworks(IntEnum):
@@ -172,6 +173,8 @@ class TxTypes(IntEnum):
 
     PTX_PRE_FUNDED = auto()
 
+    SWIPE_SWEEP = auto()
+
 
 class ActionTypes(IntEnum):
     ACCEPT_BID = auto()
@@ -235,6 +238,7 @@ class EventLogTypes(IntEnum):
     MERCY_TX_NOT_FOUND = auto()
     MERCY_TX_NOT_SENT = auto()
     MERCY_TX_UNUSABLE = auto()
+    SWIPE_PAYOUT_SWEPT = auto()
 
 
 class XmrSplitMsgTypes(IntEnum):
@@ -442,6 +446,8 @@ def strTxType(tx_type):
         return "Funded mock initiate Tx"
     if tx_type == TxTypes.MERCY:
         return "Mercy Tx"
+    if tx_type == TxTypes.SWIPE_SWEEP:
+        return "Swipe Payout Sweep Tx"
     return "Unknown"
 
 
@@ -550,6 +556,8 @@ def describeEventEntry(event_type, event_msg):
         return "Mercy tx not sent"
     if event_type == EventLogTypes.MERCY_TX_UNUSABLE:
         return "Mercy tx can't be used"
+    if event_type == EventLogTypes.SWIPE_PAYOUT_SWEPT:
+        return "Swipe payout swept to the wallet " + event_msg
     if event_type == EventLogTypes.LOCK_TX_A_SPEND_TX_SEEN:
         return "Lock tx A spend tx seen in chain"
     if event_type == EventLogTypes.LOCK_TX_B_SPEND_TX_SEEN:

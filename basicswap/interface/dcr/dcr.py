@@ -12,7 +12,6 @@ import logging
 import random
 import traceback
 
-from typing import List, Optional
 
 from basicswap.basicswap_util import (
     ADAPTOR_SIG_LOCK_SPEND_FEE_BUFFER,
@@ -1130,6 +1129,7 @@ class DCRInterface(FeeValidator, Secp256k1Interface):
         lock_unspents: bool = True,
         subfee: bool = False,
         bid_id: bytes = None,
+        cursor=None,
     ) -> bytes:
         if subfee:
             # dcrwallet's fundrawtransaction has no subtractFeeFromOutputs option,
@@ -1213,8 +1213,10 @@ class DCRInterface(FeeValidator, Secp256k1Interface):
         tx.vout.append(self.txoType()(value, self.getScriptDest(script)))
         return tx.serialize()
 
-    def fundSCLockTx(self, tx_bytes, feerate, vkbv=None, bid_id: bytes = None):
-        return self.fundTx(tx_bytes, feerate)
+    def fundSCLockTx(
+        self, tx_bytes, feerate, vkbv=None, bid_id: bytes = None, cursor=None
+    ):
+        return self.fundTx(tx_bytes, feerate, bid_id=bid_id, cursor=cursor)
 
     def genScriptLockRefundTxScript(self, Kal, Kaf, csv_val) -> bytes:
         ensure(len(Kal) == 33, "invalid Kal length")
@@ -1696,6 +1698,7 @@ class DCRInterface(FeeValidator, Secp256k1Interface):
         pkh_dest,
         tx_fee_rate,
         vkbv=None,
+        pubkey_dest=None,
     ):
         # lock refund swipe tx
         # Sends the coinA locked coin to the follower
@@ -1775,13 +1778,23 @@ class DCRInterface(FeeValidator, Secp256k1Interface):
             if "expected unspent output" not in str(e):
                 raise
 
+    def swipePaysKey(
+        self, swipe_tx_bytes: bytes, swipe_txid_hex: str, key: bytes
+    ) -> bool:
+        # TODO: Remove with the rest of the pre KA_SWIPE compatibility.
+        swipe_tx = self.loadTx(swipe_tx_bytes)
+        dest: bytes = self.getPubkeyHashDest(self.pkh(self.getPubkey(key)))
+        return bytes(swipe_tx.vout[0].script_pubkey) == bytes(dest)
+
     def createMercyTx(
         self,
         refund_swipe_tx_bytes: bytes,
         refund_swipe_tx_id: bytes,
         lock_refund_tx_script: bytes,
-        keyshare: bytes,
+        keyshare: bytes | None,
         tx_fee_rate: int,
+        key: bytes | None = None,
+        addr_to: str | None = None,
     ) -> bytes:
         # Hands the keyshare to the leader in a tx of its own, spending the
         # swipe's payout output, so it can be held back until the swipe has
@@ -1794,11 +1807,20 @@ class DCRInterface(FeeValidator, Secp256k1Interface):
         tx.version = self.txVersion()
         tx.vin.append(CTxIn(COutPoint(b2i(refund_swipe_tx_id), 0, 0)))
 
-        mercy_script = bytearray((OP_RETURN,))
-        push_script_data(mercy_script, b"XBSW")
-        push_script_data(mercy_script, keyshare)
-        tx.vout.append(self.txoType()(0, bytes(mercy_script)))
-        tx.vout.append(self.txoType()(0, prevout_script))
+        if keyshare is not None:
+            mercy_script = bytearray((OP_RETURN,))
+            push_script_data(mercy_script, b"XBSW")
+            push_script_data(mercy_script, keyshare)
+            tx.vout.append(self.txoType()(0, bytes(mercy_script)))
+        # Back to the same script by default, which is the wallet's own.  A swipe
+        # paid to a key derived for the swap has to name a destination instead,
+        # or the coin stays on a key the wallet knows nothing about.
+        dest_script: bytes = (
+            prevout_script
+            if addr_to is None
+            else self.getPubkeyHashDest(self.decodeAddress(addr_to))
+        )
+        tx.vout.append(self.txoType()(0, dest_script))
 
         # A p2pkh signature script: OP_DATA_73 <sig> OP_DATA_33 <pubkey>
         size: int = len(tx.serialize()) + 108
@@ -1806,7 +1828,7 @@ class DCRInterface(FeeValidator, Secp256k1Interface):
         change: int = prevout_value - pay_fee
         # dcrd dust threshold for a P2PKH output at the default relay fee
         ensure(change > 6030, "Swipe output too small to send a mercy tx")
-        tx.vout[1].value = change
+        tx.vout[-1].value = change
 
         self._log.info(
             "createMercyTx {}{}.".format(
@@ -1818,9 +1840,16 @@ class DCRInterface(FeeValidator, Secp256k1Interface):
                 ),
             )
         )
-        # Full serialisation, NoWitness leaves signrawtransaction nowhere to
-        # write the signature script
-        return self.signTxWithWallet(tx.serialize())
+        if key is None:
+            # The swipe paid a pooled address the wallet holds.
+            # Full serialisation, NoWitness leaves signrawtransaction nowhere to
+            # write the signature script
+            return self.signTxWithWallet(tx.serialize())
+
+        # A key derived for this swap instead, which the wallet does not hold, so
+        # nothing else can spend the output and it is signed here.
+        sig = self.signTx(key, tx.serialize(), 0, prevout_script, prevout_value)
+        return self.setTxSignature(tx.serialize(), [sig, self.getPubkey(key)])
 
     def signTxOtVES(
         self,
@@ -1862,10 +1891,10 @@ class DCRInterface(FeeValidator, Secp256k1Interface):
         script_pk = self.getScriptDest(script)
         return findOutput(tx, script_pk)
 
-    def getScriptLockTxDummyWitness(self, script: bytes) -> List[bytes]:
+    def getScriptLockTxDummyWitness(self, script: bytes) -> list[bytes]:
         return [bytes(72), bytes(72), bytes(len(script))]
 
-    def getScriptLockRefundSpendTxDummyWitness(self, script: bytes) -> List[bytes]:
+    def getScriptLockRefundSpendTxDummyWitness(self, script: bytes) -> list[bytes]:
         return [bytes(72), bytes(72), bytes(len(script))]
 
     def extractLeaderSig(self, tx_bytes: bytes) -> bytes:
@@ -2198,11 +2227,11 @@ class DCRInterface(FeeValidator, Secp256k1Interface):
         self,
         lock_type: int,
         encoded_sequence: int,
-        parent_block_height: Optional[int],
-        parent_block_time: Optional[int],
-        chain_height: Optional[int] = None,
-        chain_mtp: Optional[int] = None,
-        coin_mtp: Optional[int] = None,
+        parent_block_height: int | None,
+        parent_block_time: int | None,
+        chain_height: int | None = None,
+        chain_mtp: int | None = None,
+        coin_mtp: int | None = None,
     ) -> bool:
         if parent_block_height is None or parent_block_height < 1:
             return False
@@ -2230,8 +2259,8 @@ class DCRInterface(FeeValidator, Secp256k1Interface):
     def isAbsLockTimeMature(
         self,
         nlocktime: int,
-        chain_height: Optional[int] = None,
-        chain_mtp: Optional[int] = None,
+        chain_height: int | None = None,
+        chain_mtp: int | None = None,
     ) -> bool:
         if nlocktime == 0:
             return True

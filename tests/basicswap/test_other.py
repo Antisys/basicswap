@@ -1044,6 +1044,49 @@ class Test(unittest.TestCase):
                 ["https://swap.example.com"],
                 False,
             ),
+            # "host:port" entry -> that host on that port, any scheme.
+            (
+                "http://abc.onion:12700",
+                "127.0.0.1",
+                12700,
+                ["abc.onion:12700"],
+                True,
+            ),
+            (
+                "https://abc.onion:12700",
+                "127.0.0.1",
+                12700,
+                ["abc.onion:12700"],
+                True,
+            ),
+            (
+                "http://abc.onion:8080",
+                "127.0.0.1",
+                12700,
+                ["abc.onion:12700"],
+                False,
+            ),
+            ("http://abc.onion", "127.0.0.1", 12700, ["abc.onion:12700"], False),
+            # A bracketed IPv6 entry keeps working, with and without a port.
+            ("http://[fd00::1]:12700", "127.0.0.1", 12700, ["[fd00::1]"], True),
+            (
+                "http://[fd00::1]:12700",
+                "127.0.0.1",
+                12700,
+                ["[fd00::1]:12700"],
+                True,
+            ),
+            (
+                "http://[fd00::1]:8080",
+                "127.0.0.1",
+                12700,
+                ["[fd00::1]:12700"],
+                False,
+            ),
+            # Unbracketed IPv6 has no port to split off.
+            ("http://[fd00::1]:8080", "127.0.0.1", 12700, ["fd00::1"], True),
+            # A malformed port matches nothing.
+            ("http://abc.onion", "127.0.0.1", 12700, ["abc.onion:nope"], False),
             # "*" is ignored by the origin check.
             ("http://evil.com", "127.0.0.1", 12700, ["*"], False),
             (
@@ -1170,6 +1213,41 @@ class Test(unittest.TestCase):
         ]
         for headers, settings, expected in cases:
             assert check(Stub(settings), headers) is expected, (headers, settings)
+
+    def test_ws_handshake_bad_request(self):
+        # Anything that is not a websocket handshake (port scans, a client that
+        # closes before sending, a TLS hello) must close the connection instead
+        # of raising out of the request handler.
+        import io
+        from basicswap.contrib.websocket_server.websocket_server import (
+            WebSocketHandler,
+        )
+
+        def make_handler(data: bytes):
+            handler = WebSocketHandler.__new__(WebSocketHandler)
+            handler.rfile = io.BytesIO(data)
+            handler.keep_alive = True
+            handler.handshake_done = False
+            handler.valid_client = False
+            return handler
+
+        for data in (
+            b"",
+            b"\r\n",
+            b"\x16\x03\x01\x00\xa5\x01\x00\x00\xa1\x03\x03",
+            b"POST / HTTP/1.1\r\nUpgrade: websocket\r\n\r\n",
+        ):
+            handler = make_handler(data)
+            assert handler.read_http_headers() is None
+            handler.handshake()
+            assert handler.keep_alive is False
+
+        # A plain GET without the upgrade header is parsed, then rejected.
+        handler = make_handler(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nbroken\r\n\r\n")
+        assert handler.read_http_headers() == {"host": "127.0.0.1"}
+        handler = make_handler(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+        handler.handshake()
+        assert handler.keep_alive is False
 
     def test_is_allowed_host(self):
         from basicswap.http_server import HttpHandler
@@ -1366,6 +1444,39 @@ class Test(unittest.TestCase):
         ek_c0_p_data = decodeAddress(test_key_c0_p)[4:]
         assert m_0.encode_p() == ek_c0_p_data
 
+    def test_extkey_set_seed(self):
+        # BIP32 test vector 1, without the version prefix.
+        ek = ExtKeyPair()
+        ek.set_seed(bytes.fromhex("000102030405060708090a0b0c0d0e0f"))
+        assert (
+            ek.encode_v().hex()
+            == "000000000000000000873dff81c02f525623fd1fe5167eac3a55a049de3d314bb4"
+            "2ee227ffed37d50800e8f32e723decf4051aefac8e2c93c9c5b214313817cdb01a1494b917c8436b35"
+        )
+
+        # A master key of zero or above the group order is invalid, and BIP32 says
+        # to discard the seed rather than clamp the key. No reachable seed hashes
+        # to one, so the hmac output has to be driven directly to get there.
+        import basicswap.util.extkey as extkey_module
+
+        real_hmac_sha512 = extkey_module.hmac_sha512
+        try:
+            for bad_key in (
+                bytes(32),
+                bytes.fromhex(
+                    "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141"
+                ),
+            ):
+                extkey_module.hmac_sha512 = lambda k, d, key=bad_key: key + bytes(32)
+                self.assertRaises(ValueError, ExtKeyPair().set_seed, b"seed")
+        finally:
+            extkey_module.hmac_sha512 = real_hmac_sha512
+
+        # The patch must not have leaked into the module.
+        ek_after = ExtKeyPair()
+        ek_after.set_seed(bytes.fromhex("000102030405060708090a0b0c0d0e0f"))
+        assert ek_after.encode_v() == ek.encode_v()
+
     def test_mnemonic(self):
         entropy0: bytes = Mnemonic("english").to_entropy(mnemonics[0])
         assert entropy0.hex() == "0002207e9b744ea2d7ab41702f31f000"
@@ -1454,6 +1565,35 @@ class Test(unittest.TestCase):
             assert ki_test.label == "test4"
             assert ki_test.note == "note1"
 
+        finally:
+            db_test.closeDB(cursor)
+
+    def test_db_savepoint(self):
+        db_test = DBMethods()
+        db_test.sqlite_file = ":memory:"
+        db_test.mxDB = threading.RLock()
+        cursor = db_test.openDB()
+        try:
+            cursor.execute("CREATE TABLE sp_test (v INTEGER)")
+            cursor.execute("INSERT INTO sp_test VALUES (1)")
+            try:
+                with db_test.dbSavepoint(cursor, "sp"):
+                    cursor.execute("INSERT INTO sp_test VALUES (2)")
+                    raise ValueError("Roll back")
+            except ValueError:
+                pass
+            assert db_test._db_con.in_transaction
+            cursor.execute("INSERT INTO sp_test VALUES (3)")
+            db_test.commitDB()
+
+            # Release must not commit
+            with db_test.dbSavepoint(cursor, "sp"):
+                cursor.execute("INSERT INTO sp_test VALUES (4)")
+            assert db_test._db_con.in_transaction
+            db_test.rollbackDB()
+
+            rows = [r[0] for r in cursor.execute("SELECT v FROM sp_test ORDER BY v")]
+            assert rows == [1, 3]
         finally:
             db_test.closeDB(cursor)
 

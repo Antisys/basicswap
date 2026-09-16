@@ -9,8 +9,8 @@ import inspect
 import sqlite3
 import time
 
+from contextlib import contextmanager
 from enum import IntEnum, auto
-from typing import Optional
 
 CURRENT_DB_VERSION = 38
 CURRENT_DB_DATA_VERSION = 10
@@ -979,6 +979,21 @@ class DBMethods:
         self._db_con.rollback()
         self._onDBRolledBack()
 
+    @contextmanager
+    def dbSavepoint(self, cursor, name: str):
+        assert self._db_lock_held()
+        # Releasing an outermost savepoint would commit
+        if not self._db_con.in_transaction:
+            cursor.execute("BEGIN")
+        cursor.execute(f"SAVEPOINT {name}")
+        try:
+            yield
+        except BaseException:
+            cursor.execute(f"ROLLBACK TO SAVEPOINT {name}")
+            cursor.execute(f"RELEASE SAVEPOINT {name}")
+            raise
+        cursor.execute(f"RELEASE SAVEPOINT {name}")
+
     def _onDBCommitted(self) -> None:
         pass
 
@@ -1037,7 +1052,7 @@ class DBMethods:
         cursor=None,
         default_val: int = None,
         update_if_default: bool = True,
-    ) -> Optional[int]:
+    ) -> int | None:
         try:
             use_cursor = self.openDB(cursor)
             rows = use_cursor.execute(
@@ -1079,7 +1094,7 @@ class DBMethods:
             if cursor is None:
                 self.closeDB(use_cursor)
 
-    def getStringKV(self, str_key: str, cursor=None) -> Optional[str]:
+    def getStringKV(self, str_key: str, cursor=None) -> str | None:
         try:
             use_cursor = self.openDB(cursor)
             rows = use_cursor.execute(
