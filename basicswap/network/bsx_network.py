@@ -218,9 +218,7 @@ class BSXNetwork:
                     query, {"addr": self.network_addr}
                 ).fetchall()
                 if len(addresses) < 1:
-                    query: str = (
-                        "INSERT INTO smsgaddresses (active_ind, created_at, addr, pubkey, use_type) VALUES (:active_ind, :created_at, :addr, :pubkey, :use_type)"
-                    )
+                    query: str = "INSERT INTO smsgaddresses (active_ind, created_at, addr, pubkey, use_type) VALUES (:active_ind, :created_at, :addr, :pubkey, :use_type)"
                     cursor.execute(
                         query,
                         {
@@ -297,21 +295,15 @@ class BSXNetwork:
 
         use_cursor = self.openDB(cursor)
         try:
-            query: str = (
-                "SELECT pk_from FROM offers WHERE addr_from = :addr AND pk_from IS NOT NULL LIMIT 1"
-            )
+            query: str = "SELECT pk_from FROM offers WHERE addr_from = :addr AND pk_from IS NOT NULL LIMIT 1"
             rows = use_cursor.execute(query, {"addr": addr}).fetchall()
             if len(rows) > 0:
                 return rows[0][0]
-            query: str = (
-                "SELECT pk_bid_addr FROM bids WHERE bid_addr = :addr AND pk_bid_addr IS NOT NULL LIMIT 1"
-            )
+            query: str = "SELECT pk_bid_addr FROM bids WHERE bid_addr = :addr AND pk_bid_addr IS NOT NULL LIMIT 1"
             rows = use_cursor.execute(query, {"addr": addr}).fetchall()
             if len(rows) > 0:
                 return rows[0][0]
-            query: str = (
-                "SELECT pubkey FROM smsgaddresses WHERE addr = :addr AND pubkey IS NOT NULL LIMIT 1"
-            )
+            query: str = "SELECT pubkey FROM smsgaddresses WHERE addr = :addr AND pubkey IS NOT NULL LIMIT 1"
             rows = use_cursor.execute(query, {"addr": addr}).fetchall()
             if len(rows) > 0:
                 return bytes.fromhex(rows[0][0])

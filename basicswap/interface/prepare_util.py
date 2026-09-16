@@ -44,7 +44,10 @@ class PrepareContext:
 
 
 def createGPG(gnupg_module, homedir):
-    return gnupg_module.GPG(gnupghome=homedir)
+    try:
+        return gnupg_module.GPG(gnupghome=homedir)
+    except TypeError:
+        return gnupg_module.GPG(homedir=homedir)
 
 
 def exitWithError(error_msg: str):
